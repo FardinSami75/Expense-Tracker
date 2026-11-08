@@ -151,7 +151,7 @@ const PRESETS = [
     map: h => ({ date: h.indexOf("DATE"), desc: [h.indexOf("DESCRIPTION")], amount: h.indexOf("AMOUNT"), sign: "out-positive" }) },
   { id: "rbc", name: "RBC", account: "RBC", type: "bank",
     match: h => h.includes("TRANSACTIONDATE") && h.includes("DESCRIPTION1") && (h.includes("CAD$") || h.includes("CAD")),
-    map: h => ({ date: h.indexOf("TRANSACTIONDATE"), desc: [h.indexOf("DESCRIPTION1"), h.indexOf("DESCRIPTION2")].filter(i => i >= 0), amount: h.indexOf("CAD$") >= 0 ? h.indexOf("CAD$") : h.indexOf("CAD"), sign: "out-negative", typeCol: h.indexOf("ACCOUNTTYPE") }) },
+    map: h => ({ date: h.indexOf("TRANSACTIONDATE"), desc: [h.indexOf("DESCRIPTION1"), h.indexOf("DESCRIPTION2")].filter(i => i >= 0), amount: h.indexOf("CAD$") >= 0 ? h.indexOf("CAD$") : h.indexOf("CAD"), sign: "out-negative", typeCol: h.indexOf("ACCOUNTTYPE"), acctCol: h.indexOf("ACCOUNTNUMBER") }) },
   { id: "tangerine", name: "Tangerine", account: "Tangerine", type: "bank",
     match: h => h.includes("TRANSACTIONDATE") && h.includes("NAME") && h.includes("MEMO") && h.includes("AMOUNT"),
     map: h => ({ date: h.indexOf("TRANSACTIONDATE"), desc: [h.indexOf("NAME"), h.indexOf("MEMO")], amount: h.indexOf("AMOUNT"), sign: "out-negative" }) },
@@ -236,7 +236,13 @@ function readRows(rows, det) {
     if (!date || amount == null || amount === 0 || !desc) { skipped.push(i + det.headerIndex + 2); return; }
     let type = mp.type || "card";
     if (mp.typeCol != null && mp.typeCol >= 0) { const t = up(r[mp.typeCol]); if (/VISA|MASTERCARD|CREDIT|AMEX/.test(t)) type = "card"; else if (t) type = "bank"; }
-    out.push({ date, desc, amount: Math.round(amount * 100) / 100, type, line: i + det.headerIndex + 2 });
+    const row = { date, desc, amount: Math.round(amount * 100) / 100, type, line: i + det.headerIndex + 2 };
+    // One file with several accounts (RBC): name each line's account, e.g. "RBC Chequing 4567".
+    if (mp.acctCol != null && mp.acctCol >= 0 && r[mp.acctCol]) {
+      const digits = String(r[mp.acctCol]).replace(/\D/g, ""), kind = mp.typeCol >= 0 ? titleCase(String(r[mp.typeCol] || "").trim()) : "";
+      row.account = clean([mp.account || mp.name, kind, digits.slice(-4)].filter(Boolean).join(" "));
+    }
+    out.push(row);
   });
   return { rows: out, skipped };
 }
@@ -318,7 +324,7 @@ function classify(r, rules) {
 function importHashes(rows, account) {
   const seen = {};
   return rows.map(r => {
-    const base = [up(account || ""), r.date, r.amount.toFixed(2), up(r.desc).replace(/\s+/g, " ")].join("|");
+    const base = [up(r.account || account || ""), r.date, r.amount.toFixed(2), up(r.desc).replace(/\s+/g, " ")].join("|");
     seen[base] = (seen[base] || 0) + 1;
     return hashOf(base + "|" + seen[base]);
   });
@@ -408,9 +414,162 @@ function projection(st, lastFixed) {
   return { projected: varEnd + st.fixed + expectedBills + st.planned, expectedBills, pace };
 }
 
+/* ---------- PDF statements ---------- */
+// pages: [[{ s, x, y, w }]] — text pieces with y measured from the top of the page.
+const MON = "(JAN|FEB|MAR|APR|MAY|JUNE?|JULY?|AUG|SEPT?|OCT|NOV|DEC)[A-Z]*\\.?";
+const RE_DMY = new RegExp("^(\\d{1,2})[\\s-]*" + MON + "(?:[\\s,-]*(\\d{4}))?(?![A-Z0-9])");
+const RE_MDY = new RegExp("^" + MON + "[\\s-]*(\\d{1,2})(?:,?\\s+(\\d{4}))?(?![0-9])");
+const RE_FULL = new RegExp("(?:" + MON + "\\s+(\\d{1,2}),?\\s+(\\d{4}))|(?:(\\d{1,2})\\s+" + MON + "\\s+(\\d{4}))|(?:(\\d{4})-(\\d{2})-(\\d{2}))", "g");
+const monNum = s => MONTHS[String(s).toLowerCase().slice(0, 3)];
+const AMT = /^[-−(]?\s?\$?\s?\d{1,3}(?:[, ]\d{3})*\.\d{2}\)?(?:\s?(?:CR|DR|-))?$/i;
+
+function leadingDate(t) {
+  const T = up(t); let m;
+  if ((m = T.match(/^(\d{4})-(\d{2})-(\d{2})(?![\d])/))) return { y: +m[1], m: +m[2], d: +m[3], len: m[0].length };
+  if ((m = T.match(RE_DMY))) return { d: +m[1], m: monNum(m[2]), y: m[3] ? +m[3] : null, len: m[0].length };
+  if ((m = T.match(RE_MDY))) return { m: monNum(m[1]), d: +m[2], y: m[3] ? +m[3] : null, len: m[0].length };
+  if ((m = T.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d.])/))) {
+    let a = +m[1], b = +m[2]; if (a > 12) [a, b] = [b, a];
+    return { m: a, d: b, y: m[3] ? fixYear(+m[3]) : null, len: m[0].length };
+  }
+  return null;
+}
+
+// Joins text pieces into lines, and close pieces into cells.
+function pdfLines(pages) {
+  const lines = [];
+  pages.forEach((items, pi) => {
+    const its = items.filter(i => String(i.s).trim()).sort((a, b) => a.y - b.y || a.x - b.x);
+    let cur = null;
+    its.forEach(i => { if (!cur || Math.abs(i.y - cur.y) > 2.6) { cur = { page: pi, y: i.y, items: [] }; lines.push(cur); } cur.items.push(i); });
+  });
+  lines.forEach(l => {
+    l.items.sort((a, b) => a.x - b.x);
+    const cells = [];
+    l.items.forEach(i => {
+      const last = cells[cells.length - 1], s = String(i.s);
+      if (last && i.x - last.x2 < 4) { last.s += (i.x - last.x2 > 0.8 && !/\s$/.test(last.s) ? " " : "") + s; last.x2 = i.x + (i.w || 0); }
+      else cells.push({ s, x: i.x, x2: i.x + (i.w || s.length * 4.5) });
+    });
+    cells.forEach(c => c.s = c.s.replace(/\s+/g, " ").trim());
+    // "45.00" and "CR" printed as separate pieces
+    for (let k = cells.length - 2; k >= 0; k--) if (AMT.test(cells[k].s) && /^(CR|DR|-)$/i.test(cells[k + 1].s)) { cells[k].s += " " + cells[k + 1].s; cells[k].x2 = cells[k + 1].x2; cells.splice(k + 1, 1); }
+    l.cells = cells.filter(c => c.s);
+    l.text = l.cells.map(c => c.s).join("  ");
+  });
+  return lines.filter(l => l.cells.length);
+}
+
+function pdfMeta(lines) {
+  const first = lines.filter(l => l.page === 0).map(l => l.text).join("\n"), all = lines.map(l => l.text).join("\n"), U = up(first), A = up(all);
+  const BANKS = [["RBC", /ROYAL BANK|\bRBC\b/], ["CIBC", /\bCIBC\b/], ["Amex", /AMERICAN EXPRESS|\bAMEX\b/], ["Tangerine", /TANGERINE/], ["Simplii", /SIMPLII/],
+    ["Neo", /NEO FINANCIAL|\bNEO\b/], ["Scotiabank", /SCOTIA/], ["TD", /\bTD CANADA|\bTD BANK|\bTD\b/], ["BMO", /\bBMO\b|BANK OF MONTREAL/], ["EQ Bank", /EQ BANK/], ["Wealthsimple", /WEALTHSIMPLE/], ["KOHO", /\bKOHO\b/]];
+  const bank = (BANKS.find(([, re]) => re.test(U)) || BANKS.find(([, re]) => re.test(A)) || [""])[0];
+  const isCard = /CREDIT LIMIT|MINIMUM PAYMENT|PAYMENT DUE DATE|AMERICAN EXPRESS|CREDIT CARD|\bVISA\b|MASTERCARD|CARDMEMBER|CARD MEMBER/.test(U);
+  // the account kind is named in the heading area, before the list of transactions
+  const hi = lines.findIndex(l => /WITHDRAW|DEPOSITS?\b|AMOUNT|DESCRIPTION|DETAILS/.test(up(l.text)) && /DATE|DESCRIPTION|DETAILS/.test(up(l.text)));
+  const H = up(lines.slice(0, hi > 0 ? hi : 25).map(l => l.text).join("\n"));
+  const sav = (H.match(/SAVINGS/g) || []).length, che = (H.match(/CHEQUING|CHECKING/g) || []).length;
+  const kind = isCard ? (/\bVISA\b/.test(U) ? "Visa" : /MASTERCARD/.test(U) ? "Mastercard" : "") : sav > che ? "Savings" : che ? "Chequing" : "";
+  let m, last4 = "";
+  if ((m = U.match(/(?:ENDING IN|ENDS? WITH|ACCOUNT ENDING|CARD ENDING|X{3,}|\*{2,}|•{2,})[\s:-]*(?:\d+-)?(\d{4,5})\b/))) last4 = m[1].slice(-4);
+  else if ((m = U.match(/ACCOUNT\s*(?:NUMBER|NO\.?|#)?\s*:?\s*([\d][\d\s-]{5,22}\d)/))) last4 = m[1].replace(/\D/g, "").slice(-4);
+  // latest full date on the first page: the statement date or due date, used to give "Oct 27" its year
+  const dates = []; let f; RE_FULL.lastIndex = 0;
+  while ((f = RE_FULL.exec(U))) { const d = f[1] ? iso(+f[3], monNum(f[1]), +f[2]) : f[4] ? iso(+f[6], monNum(f[5]), +f[4]) : iso(+f[7], +f[8], +f[9]); if (d) dates.push(d); }
+  return { bank, kind, type: isCard ? "card" : "bank", last4, anchor: dates.sort().pop() || null };
+}
+
+function withYear(dt, anchor) {
+  if (dt.y) return iso(dt.y, dt.m, dt.d);
+  const ay = +anchor.slice(0, 4);
+  for (const y of [ay, ay - 1, ay + 1]) { const d = iso(y, dt.m, dt.d); if (!d) continue; const diff = (dUTC(d) - dUTC(anchor)) / 864e5; if (diff <= 40 && diff > -330) return d; }
+  return iso(ay, dt.m, dt.d);
+}
+
+const PDF_SKIP = /^(OPENING|CLOSING|STARTING|ENDING) BALANCE|^BALANCE FORWARD|^(PREVIOUS|NEW|PRIOR) (STATEMENT )?BALANCE|^TOTAL|^SUB-?TOTAL|^MINIMUM|^PAYMENT DUE|^CREDIT LIMIT|^AVAILABLE|^INTEREST RATE|^ANNUAL INTEREST|^STATEMENT|^PAGE \d|^CONTINUED|^DATE\b|^TRANS(ACTION)?\.? DATE|^POST(ING|ED)? DATE|^DESCRIPTION|^ACCOUNT (NUMBER|SUMMARY)|^YOUR |^SUMMARY/;
+const OPEN_RE = /(OPENING|STARTING) BALANCE|BALANCE FORWARD|PREVIOUS (STATEMENT )?BALANCE|PRIOR BALANCE/;
+const CLOSE_RE = /(CLOSING|ENDING) BALANCE|NEW BALANCE/;
+
+function pdfAmount(s) { const a = parseAmount(String(s).replace(/(\d) (\d{3})/g, "$1,$2").replace(/\bDR\b/i, "")); return a; }
+
+// Reads transactions from a PDF statement. Returns { rows, meta, check }.
+function parsePdf(pages, today) {
+  const lines = pdfLines(pages), meta = pdfMeta(lines);
+  const anchor = meta.anchor || today || new Date().toISOString().slice(0, 10);
+  const pageW = Math.max(...pages.flat().map(i => i.x + (i.w || 0)), 400);
+  let cols = null, colsPage = -1, lastDate = null, lastTx = null, prevBal = null, opening = null, closing = null;
+  const rows = [];
+  for (const l of lines) {
+    const U = up(l.text);
+    // column headings: Withdrawals / Deposits / Balance, or Amount
+    const hw = l.cells.find(c => /WITHDRAW|DEBITS?\b|CHEQUES|PAID OUT|MONEY OUT|FUNDS OUT/.test(up(c.s))), hd = l.cells.find(c => /DEPOSITS?\b|CREDITS?\b|PAID IN|MONEY IN|FUNDS IN/.test(up(c.s)));
+    const hb = l.cells.find(c => /^BALANCE|BALANCE \(\$\)/.test(up(c.s))), ha = l.cells.find(c => /^AMOUNT/.test(up(c.s)));
+    if (((hw && hd) || (ha && /DATE|DESCRIPTION|DETAILS|TRANSACTION/.test(U))) && !leadingDate(l.text)) {
+      const mid = c => c ? (c.x + c.x2) / 2 : null;
+      cols = { w: mid(hw), d: mid(hd), b: mid(hb), a: mid(ha), left: Math.min(...[hw, hd, hb, ha].filter(Boolean).map(c => c.x)) };
+      colsPage = l.page; lastTx = null; continue;
+    }
+    const amtLeft = cols ? cols.left - 45 : pageW * 0.6;
+    const amts = l.cells.filter(c => AMT.test(c.s) && c.x2 >= amtLeft);
+    const textCells = l.cells.filter(c => !amts.includes(c));
+    let text = textCells.map(c => c.s).join(" ").trim();
+    const dt = leadingDate(text);
+    let date = null;
+    if (dt) {
+      date = withYear(dt, anchor); text = text.slice(dt.len).replace(/^[\s,.-]+/, "");
+      const dt2 = leadingDate(text); if (dt2) text = text.slice(dt2.len).replace(/^[\s,.-]+/, "");   // posting date
+    }
+    const T = up(text);
+    if (amts.length && OPEN_RE.test(T)) { const v = pdfAmount(amts[amts.length - 1].s); if (opening == null) opening = v; prevBal = v; continue; }
+    if (amts.length && CLOSE_RE.test(T)) { if (closing == null) closing = pdfAmount(amts[amts.length - 1].s); continue; }
+    if (!amts.length) {
+      // a description that wraps onto the next line
+      if (!dt && lastTx && lastTx.page === l.page && l.y - lastTx.y < 15 && lastTx.extra < 2 && text && !PDF_SKIP.test(T) && !AMT.test(text)) { lastTx.row.desc += "  " + text; lastTx.extra++; lastTx.y = l.y; }
+      else if (dt) lastDate = date;
+      continue;
+    }
+    if (!text || PDF_SKIP.test(T)) { if (amts.length && /BALANCE/.test(T)) prevBal = pdfAmount(amts[amts.length - 1].s); continue; }
+    if (!date) {
+      // banks often print the date once per day
+      const inTable = (cols && colsPage === l.page) || (lastTx && lastTx.page === l.page);
+      if (!lastDate || !inTable) continue;
+      date = lastDate;
+    }
+    lastDate = date;
+    // which number is the transaction and which is the running balance
+    let amt = null, bal = null, side = null;
+    const near = c => { if (!cols) return null; const x = (c.x + c.x2) / 2, opts = [["w", cols.w], ["d", cols.d], ["b", cols.b], ["a", cols.a]].filter(o => o[1] != null); opts.sort((p, q) => Math.abs(p[1] - x) - Math.abs(q[1] - x)); return opts[0] ? opts[0][0] : null; };
+    amts.forEach(c => { const k = near(c), v = pdfAmount(c.s); if (k === "b") bal = v; else if (amt == null) { amt = v; side = k; } });
+    if (amt == null || amt === 0) continue;
+    if (!cols && amts.length >= 2) { bal = pdfAmount(amts[amts.length - 1].s); amt = pdfAmount(amts[0].s); }
+    let out;   // + = money out
+    const neg = amt < 0;
+    if (side === "w") out = Math.abs(amt); else if (side === "d") out = -Math.abs(amt);
+    else out = meta.type === "card" ? amt : (neg ? -amt : amt);   // cards: purchases positive, credits negative or "CR"
+    if (bal != null && prevBal != null) {
+      if (Math.abs(prevBal - Math.abs(amt) - bal) < 0.011) out = Math.abs(amt); else if (Math.abs(prevBal + Math.abs(amt) - bal) < 0.011) out = -Math.abs(amt);
+    }
+    if (bal != null) prevBal = bal;
+    const row = { date, desc: text, amount: Math.round(out * 100) / 100, type: meta.type, line: rows.length + 1 };
+    rows.push(row); lastTx = { row, page: l.page, y: l.y, extra: 0 };
+  }
+  // Does it add up to the statement's own totals?
+  let check = null;
+  if (opening != null && closing != null && rows.length) {
+    const net = rows.reduce((a, r) => a + r.amount, 0);
+    const expect = meta.type === "card" ? Math.abs(opening) + net : opening - net;
+    check = { opening, closing, expect: Math.round(expect * 100) / 100, ok: Math.abs(Math.abs(expect) - Math.abs(closing)) < 0.006 };
+  }
+  const name = meta.bank === "Amex" ? "Amex" : clean([meta.bank, meta.kind].filter(Boolean).join(" "));
+  meta.account = clean([name, meta.bank === "Amex" ? "" : meta.last4].join(" ")) || "";
+  meta.signature = "pdf:" + up([meta.bank, meta.kind, meta.last4].join("|"));
+  return { rows, meta, check };
+}
+
 const api = { CATEGORIES, CAT, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
   merchantKey, displayName, payeeOf, classify, builtinCategory, importHashes, hashOf,
-  paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
+  parsePdf, leadingDate, paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
 root.SpendEngine = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

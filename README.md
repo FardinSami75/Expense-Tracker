@@ -31,7 +31,11 @@ Only the code is in this repository. No spending data is stored here.
 - A six-month chart of spending vs pay (also shown as a table).
 
 ### Statement import
-- Upload a **CSV or Excel** file from your bank or card. Amex, CIBC, RBC, Neo, Simplii and Tangerine layouts are recognised; any other bank works by picking the columns once, and the layout is remembered.
+- Upload **PDF statements** or **CSV / Excel** downloads. You can pick several files at once and go through them one by one.
+- **CSV / Excel:** Amex, CIBC, RBC, Neo, Simplii and Tangerine layouts are recognised; any other bank works by picking the columns once, and the layout is remembered.
+- **PDF:** the transactions are read in your browser (the file isn't uploaded anywhere). The bank, account type and last 4 digits are picked up to name the account (e.g. "CIBC Visa 7788"). When the statement shows opening and closing balances, the preview checks the lines add up to the closing balance, so you know nothing was missed or misread. Scanned (image-only) PDFs can't be read; use the CSV download for those.
+- **Several accounts in one file:** RBC's CSV download includes all your accounts; each line is filed under its own account (e.g. "RBC Chequing 4567", "RBC Savings 4321").
+- Lines with the same date and amount as something already imported from another file (e.g. a PDF and a CSV of the same month) are held back as probable duplicates, with an option to import them anyway.
 - A preview shows every line, its category, and the totals **before anything is saved**.
 - **Importing the same file twice adds nothing twice.** Overlapping statements are fine.
 - **Not counted as spending:** card payments (e.g. "PAYMENT RECEIVED - THANK YOU", or paying Amex from your bank), transfers between your own accounts, and pay deposits (pay comes from Pay Tracker instead).
@@ -86,6 +90,6 @@ Only the code is in this repository. No spending data is stored here.
 | File | What it is |
 |---|---|
 | `index.html` | The site |
-| `engine.js` | Statement reading, categories, pay and projection maths |
+| `engine.js` | Statement reading (CSV, Excel, PDF), categories, pay and projection maths |
 | `config.js` | Supabase connection (shared with Pay Tracker) |
 | `setup.sql` | Database tables and the Apple Pay function |
