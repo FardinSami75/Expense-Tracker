@@ -252,7 +252,7 @@ const PROCESSORS = /^(PAYPAL|PP|SQ|SP|TST|SUMUP|ZTL|CLV|GOOGLE|APPLE PAY|IZ|EB|W
 const PLACES = new Set(["CALGARY", "EDMONTON", "TORONTO", "VANCOUVER", "MONTREAL", "OTTAWA", "WINNIPEG", "HALIFAX", "AIRDRIE", "COCHRANE", "OKOTOKS", "CHESTERMERE", "BANFF", "CANMORE", "MISSISSAUGA",
   "AB", "BC", "ON", "QC", "MB", "SK", "NS", "NB", "CA", "CAN", "USA", "US", "SAN", "FRANCISCO", "SEATTLE", "NEW", "YORK", "MID-HAR", "INTERNET", "ONLINE", "WWW"]);
 const PRETTY = { SKIPTHEDISHES: "SkipTheDishes", OPENAI: "OpenAI (ChatGPT)", ANTHROPIC: "Anthropic (Claude)", "AMAZON.CA": "Amazon", AMAZON: "Amazon", AMZN: "Amazon", TEMU: "Temu", INSTACART: "Instacart",
-  CHEXY: "Chexy (rent)", TELUS: "Telus", "TIM HORTONS": "Tim Hortons", FRESHCO: "FreshCo", UBER: "Uber", "UBER EATS": "Uber Eats", DOORDASH: "DoorDash", MCDONALDS: "McDonald's", "MCDONALD'S": "McDonald's" };
+  CHEXY: "Chexy (rent)", "CHEXY FEE": "Chexy fee", TELUS: "Telus", "TIM HORTONS": "Tim Hortons", FRESHCO: "FreshCo", UBER: "Uber", "UBER EATS": "Uber Eats", DOORDASH: "DoorDash", MCDONALDS: "McDonald's", "MCDONALD'S": "McDonald's" };
 
 // A short, stable name for the shop, used to group spending and to remember categories.
 function merchantKey(desc) {
@@ -303,8 +303,19 @@ function titleCase(s) { return s.toLowerCase().replace(/(^|[\s.&'-])([a-z])/g, (
 /* ---------- categorising ---------- */
 function builtinCategory(U) { for (const [re, cat] of BUILTIN) if (re.test(U)) return cat; return "Other"; }
 
+// Chexy charges rent to a card plus a 1.75% fee. Only the fee counts as spending; the rent itself is left out.
+const CHEXY_FEE = 0.0175;
+function splitChexy(r) {
+  if (!/CHEXY/.test(up(r.desc)) || !r.amount) return [r];
+  const rent = Math.round(r.amount / (1 + CHEXY_FEE) * 100) / 100, fee = Math.round((r.amount - rent) * 100) / 100;
+  return [Object.assign({}, r, { amount: rent, chexy: "rent", note: "Rent through Chexy (not counted, only the fee is)" }),
+          Object.assign({}, r, { amount: fee, desc: r.desc + " · 1.75% fee", chexy: "fee", note: "Chexy's 1.75% card fee" })];
+}
+
 // rules: [{ pattern, category, kind }] saved by the person. Returns { merchant, category, kind }.
 function classify(r, rules) {
+  if (r.chexy === "rent") return { merchant: "CHEXY", category: "Rent & housing", kind: "ignore" };
+  if (r.chexy === "fee") return { merchant: "CHEXY FEE", category: "Fees & interest", kind: "spend" };
   const U = up(r.desc), key = merchantKey(r.desc), moneyIn = r.amount < 0, isBank = r.type === "bank";
   const rule = (rules || []).find(x => x.pattern === key) || (rules || []).find(x => x.pattern.length >= 4 && U.includes(x.pattern));
   if (rule) return { merchant: key, category: rule.category, kind: rule.kind || "spend", rule: true };
@@ -569,7 +580,7 @@ function parsePdf(pages, today) {
 
 const api = { CATEGORIES, CAT, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
   merchantKey, displayName, payeeOf, classify, builtinCategory, importHashes, hashOf,
-  parsePdf, leadingDate, paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
+  parsePdf, leadingDate, splitChexy, CHEXY_FEE, paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
 root.SpendEngine = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

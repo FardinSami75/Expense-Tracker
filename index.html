@@ -648,6 +648,7 @@ function planImport(){
   let rows,skipped=[];
   if(I.pdf)rows=I.pdf.rows.map(r=>Object.assign({},r,{type:mp.type||r.type}));
   else ({rows,skipped}=E.readRows(I.rows,Object.assign({},I.det,{mapping:mp})));
+  rows=rows.flatMap(E.splitChexy);
   const hashes=E.importHashes(rows,account);
   const have=new Set(S.exp.map(e=>e.import_hash).filter(Boolean));
   // Same date and amount as something already imported from another file (e.g. a PDF and a CSV of the same month)
@@ -658,7 +659,7 @@ function planImport(){
     if(item.dup)return item;
     const k=r.date+"|"+Math.abs(r.amount).toFixed(2);
     if(pool[k]>0){pool[k]--;item.maybe=true;return item}
-    if(r.amount>0){const t=taps.find(t=>!t.used&&Math.abs(Number(t.e.amount)-r.amount)<.005&&Math.abs(daysBetween(t.e.date,r.date))<=4);if(t){t.used=true;item.tap=t.e}}
+    if(r.amount>0&&!r.chexy){const t=taps.find(t=>!t.used&&Math.abs(Number(t.e.amount)-r.amount)<.005&&Math.abs(daysBetween(t.e.date,r.date))<=4);if(t){t.used=true;item.tap=t.e}}
     return item});
   // dup lines found by exact id don't take a "maybe" slot from a real duplicate
   return {items,skipped,account,take:x=>!x.dup&&(!x.maybe||I.includeMaybe)};
@@ -735,7 +736,7 @@ function buildPreview(){
 async function doImport(){
   const b=$("impGo");b.disabled=true;b.textContent="Importing…";
   const P=planImport(),take=P.items.filter(P.take);
-  const base=x=>({date:x.r.date,description:x.r.desc,merchant:x.c.merchant,amount:x.r.amount,category:x.c.category,kind:x.c.kind,account:x.acct,source:"import",import_hash:x.hash});
+  const base=x=>({date:x.r.date,description:x.r.desc,merchant:x.c.merchant,amount:x.r.amount,category:x.c.category,kind:x.c.kind,account:x.acct,source:"import",import_hash:x.hash,note:x.r.note||null});
   try{
     const ins=take.filter(x=>!x.tap).map(x=>Object.assign({user_id:S.user.id},base(x)));
     for(let i=0;i<ins.length;i+=200){const {error}=await sb.from("expenses").upsert(ins.slice(i,i+200),{onConflict:"user_id,import_hash",ignoreDuplicates:true});if(error)throw error}

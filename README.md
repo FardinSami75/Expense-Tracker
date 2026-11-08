@@ -42,6 +42,9 @@ Only the code is in this repository. No spending data is stored here.
 - **Refunds** count as money back in the shop's category.
 - **e-Transfers** go under "Transfers to people" with the person's name. Money a friend sends back counts as money back. Change the category of one (e.g. to Eating out for your half of dinner) and tick "Always" to do it for that person every time.
 
+### Chexy rent
+- Rent paid through Chexy is split into two lines: the rent itself, which is **not counted** as spending, and Chexy's **1.75% card fee**, which counts under Fees & interest. For example, an $814 charge becomes $800 rent (not counted) + $14 fee.
+
 ### Categories that learn
 - Purchases are sorted automatically (groceries, eating out, gas, rent, bills, subscriptions, shopping, and more).
 - Tap any line to change its category, amount, date or note. Tick **Always do this for …** to fix every past and future line from that shop.
