@@ -42,6 +42,10 @@ Only the code is in this repository. No spending data is stored here.
 - **Refunds** count as money back in the shop's category.
 - **e-Transfers** go under "Transfers to people" with the person's name. Money a friend sends back counts as money back. Change the category of one (e.g. to Eating out for your half of dinner) and tick "Always" to do it for that person every time.
 
+### Split bills
+- Paid the whole table's bill? Tap the line (or tick **I paid for others too** when adding one) and enter **my share**. A $300 charge with an $80 share counts as **$80** of spending; the $220 is tracked under **Friends owe you**.
+- e-Transfers you receive while friends owe you are filed as **Friend paying me back**, which doesn't count as spending or money back, so nothing is counted twice. The owed total goes down as they pay.
+
 ### Chexy rent
 - Rent paid through Chexy is split into two lines: the rent itself, which is **not counted** as spending, and Chexy's **1.75% card fee**, which counts under Fees & interest. For example, an $814 charge becomes $800 rent (not counted) + $14 fee.
 

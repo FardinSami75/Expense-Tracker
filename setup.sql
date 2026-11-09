@@ -22,6 +22,8 @@ create table if not exists public.expenses (
   unique (user_id, import_hash)
 );
 create index if not exists expenses_user_date on public.expenses (user_id, date);
+-- Split bills: when you paid for others too, your part of the amount. Empty = the whole amount is yours.
+alter table public.expenses add column if not exists my_share numeric(10,2);
 
 -- "Always put this shop in this category" rules you set in the app.
 create table if not exists public.spend_rules (
@@ -137,7 +139,7 @@ begin
   values (uid, today, coalesce(nullif(trim(merchant), ''), 'Apple Pay'), nullif(trim(merchant), ''), amt, null, 'spend',
           coalesce(nullif(trim(card), ''), 'Apple Pay'), 'tap');
 
-  select coalesce(sum(e.amount), 0) into spent from expenses e
+  select coalesce(sum(coalesce(e.my_share, e.amount)), 0) into spent from expenses e
    where e.user_id = uid and e.kind = 'spend' and e.date >= m_start and e.date < (m_start + interval '1 month');
   select coalesce(sum(p.monthly), 0) into planned from plans p
    where p.user_id = uid and p.start_month <= m_start and m_start < (p.start_month + make_interval(months => p.payments));

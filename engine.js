@@ -43,6 +43,7 @@ const KINDS = {
   transfer: "Between my accounts",
   income:   "Pay / money in",
   plan:     "On an instalment plan",
+  repay:    "Friend paying me back (split bill)",
   ignore:   "Don't count"
 };
 
@@ -412,7 +413,7 @@ function monthStats(expenses, plans, month, today) {
   const byCat = {}, byShop = {};
   let total = 0, fixed = 0, refunds = 0;
   rows.forEach(e => {
-    const a = Number(e.amount), c = e.category || "Other";
+    const a = myPart(e), c = e.category || "Other";
     total += a; if (a < 0) refunds += -a;
     byCat[c] = (byCat[c] || 0) + a;
     if (CAT[c] && CAT[c].fixed) fixed += a;
@@ -425,6 +426,19 @@ function monthStats(expenses, plans, month, today) {
   const variable = total - fixed;
   return { rows, total, fixed, variable, refunds, planned, byCat, byShop, days, elapsed,
     outflow: total + planned, isPast: month < cur, isFuture: month > cur };
+}
+
+// What counts as yours: the whole amount, or just your share of a split bill.
+const myPart = e => e.my_share != null && e.my_share !== "" ? Number(e.my_share) : Number(e.amount);
+const isSplit = e => e.my_share != null && e.my_share !== "" && Number(e.amount) > 0;
+
+// Split bills: what friends owed you, what they've paid back, what's still owed.
+function owedSummary(expenses) {
+  const splits = expenses.filter(e => e.kind === "spend" && isSplit(e)).sort((a, b) => a.date < b.date ? 1 : -1);
+  const repays = expenses.filter(e => e.kind === "repay").sort((a, b) => a.date < b.date ? 1 : -1);
+  const owed = splits.reduce((t, e) => t + Number(e.amount) - Number(e.my_share), 0);
+  const repaid = repays.reduce((t, e) => t + Math.abs(Number(e.amount)), 0);
+  return { splits, repays, owed, repaid, outstanding: Math.round((owed - repaid) * 100) / 100 };
 }
 
 // Where the month is heading. lastFixed = last month's bills, used until this month's arrive.
@@ -591,7 +605,7 @@ function parsePdf(pages, today) {
   return { rows, meta, check };
 }
 
-const api = { CATEGORIES, CAT, BUILTIN_NAMES, setCustomCategories, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
+const api = { myPart, isSplit, owedSummary, CATEGORIES, CAT, BUILTIN_NAMES, setCustomCategories, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
   merchantKey, displayName, payeeOf, classify, builtinCategory, importHashes, hashOf,
   parsePdf, leadingDate, splitChexy, CHEXY_FEE, paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
 root.SpendEngine = api;
