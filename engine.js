@@ -43,7 +43,7 @@ const KINDS = {
   transfer: "Between my accounts",
   income:   "Pay / money in",
   plan:     "On an instalment plan",
-  repay:    "Friend paying me back (split bill)",
+  repay:    "Paid back for something I bought them",
   ignore:   "Don't count"
 };
 
