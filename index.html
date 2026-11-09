@@ -342,6 +342,7 @@ details summary{cursor:pointer;font-weight:600;font-size:14px}
         <div class="field"><label for="sWarn">Warn me at (% of pay)</label><input id="sWarn" type="number" min="30" max="100" step="5"><span class="hint">You'll also be warned whenever you're on pace to spend more than you earn.</span></div>
       </div>
       <details id="shortcutBox"><summary>Apple Pay automatic logging</summary><div id="shortcut" style="margin-top:12px;display:flex;flex-direction:column;gap:10px"></div></details>
+      <details id="catBox"><summary>Categories</summary><div id="cats2" style="margin-top:10px;display:flex;flex-direction:column;gap:10px"></div></details>
       <details><summary>Saved shop rules</summary><div id="rules" style="margin-top:10px"></div></details>
       <div class="actions"><button class="btn small" type="button" id="csvBtn">Download transactions (CSV)</button><button class="btn small" type="button" id="bkBtn">Download backup</button></div>
     </section>
@@ -365,6 +366,15 @@ details summary{cursor:pointer;font-weight:600;font-size:14px}
   <div class="field"><label for="eNote">Note</label><input id="eNote" type="text" placeholder="e.g. my half of dinner"></div>
   <label class="check" id="eRuleRow"><input type="checkbox" id="eRule"> <span id="eRuleLbl"></span></label>
   <div class="actions"><button class="btn primary grow" value="save" id="eSave">Save</button><button class="btn danger" type="button" id="eDel">Delete</button></div>
+</form></dialog>
+
+<dialog id="catDlg"><form class="in" id="catForm" autocomplete="off">
+  <div class="card-head"><h2>New category</h2><button class="btn small" type="button" id="cClose" aria-label="Close">✕</button></div>
+  <div class="field"><label for="cName">Name</label><input id="cName" type="text" maxlength="30" placeholder="e.g. Car, Pets, Family back home" required></div>
+  <label class="check"><input type="checkbox" id="cFixed"> It's a monthly bill (paid once a month, like rent or phone)</label>
+  <span class="hint" style="margin-top:-6px">Monthly bills aren't projected forward like day-to-day spending.</span>
+  <div class="err" id="cErr" hidden></div>
+  <button class="btn primary" type="submit" id="cSave">Add category</button>
 </form></dialog>
 
 <div class="toast" id="toast" hidden></div>
@@ -392,7 +402,7 @@ function toast(m){const t=$("toast");t.textContent=m;t.hidden=false;clearTimeout
 function banner(m){$("banner").innerHTML=m;$("banner").hidden=!m}
 
 /* ---------- state ---------- */
-const S={user:null,exp:[],rules:[],layouts:{},plans:[],settings:{take_home:.9,warn_at:.8,shortcut_token:null},
+const S={user:null,exp:[],rules:[],customCats:[],catsOk:true,layouts:{},plans:[],settings:{take_home:.9,warn_at:.8,shortcut_token:null},
   pay:{shifts:[],rates:{},tasks:[]},payOk:false,month:todayStr().slice(0,7),cat:"all",q:"",showAll:false,shown:80,imp:null,editId:null,planEdit:null};
 const takeHome=()=>Number(S.settings.take_home)||.9;
 const warnAt=()=>Number(S.settings.warn_at)||.8;
@@ -536,7 +546,75 @@ $("fCat").addEventListener("change",()=>{S.cat=$("fCat").value;S.shown=80;$("fAl
 $("fAll").addEventListener("change",()=>{S.showAll=$("fAll").checked;if(!S.showAll&&S.cat==="off")S.cat="all";syncFilters();renderList()});
 
 /* ---------- edit dialog ---------- */
-const catOptions=sel=>E.CATEGORIES.map(c=>`<option ${c.name===sel?"selected":""}>${esc(c.name)}</option>`).join("");
+const NEW_CAT="__new__";
+const catOptions=sel=>{const names=E.CATEGORIES.map(c=>c.name);if(sel&&!names.includes(sel))names.splice(names.length-1,0,sel);
+  return names.map(n=>`<option ${n===sel?"selected":""}>${esc(n)}</option>`).join("")+`<option value="${NEW_CAT}">＋ New category…</option>`};
+// "New category…" in any category list opens the dialog, then picks the new one.
+function watchCatSelect(sel){let prev=sel.value;
+  sel.addEventListener("focus",()=>{if(sel.value!==NEW_CAT)prev=sel.value});
+  sel.addEventListener("change",async ev=>{if(sel.value!==NEW_CAT){prev=sel.value;return}
+    ev.stopImmediatePropagation();const name=await askNewCategory();
+    sel.innerHTML=catOptions(name||prev);sel.value=name||prev;prev=sel.value;
+    if(name)sel.dispatchEvent(new Event("change"))},true)}
+
+/* ---------- categories you add ---------- */
+let catResolve=null;
+function askNewCategory(){$("cName").value="";$("cFixed").checked=false;$("cErr").hidden=true;$("catDlg").showModal();$("cName").focus();
+  return new Promise(res=>catResolve=res)}
+function closeCat(v){$("catDlg").close();if(catResolve){const r=catResolve;catResolve=null;r(v)}}
+$("cClose").onclick=()=>closeCat(null);
+$("catDlg").addEventListener("cancel",()=>{if(catResolve){const r=catResolve;catResolve=null;r(null)}});
+$("catForm").addEventListener("submit",async ev=>{ev.preventDefault();
+  const name=await addCategory($("cName").value,$("cFixed").checked,msg=>{$("cErr").textContent=msg;$("cErr").hidden=false});
+  if(name)closeCat(name)});
+async function addCategory(raw,fixed,fail){
+  const name=String(raw||"").replace(/\s+/g," ").trim();
+  if(!name)return fail("Give it a name."),null;
+  if(name.length>30)return fail("Keep it to 30 characters or fewer."),null;
+  const clash=E.CATEGORIES.find(c=>c.name.toLowerCase()===name.toLowerCase());
+  if(clash)return fail(`“${clash.name}” already exists.`),null;
+  if(!S.catsOk)return fail("Run the updated setup.sql in Supabase first (SQL Editor → paste → Run), then reload."),null;
+  const {error}=await sb.from("spend_categories").insert({user_id:S.user.id,name,fixed:!!fixed});
+  if(error)return fail(/relation|schema cache|does not exist/i.test(error.message||"")?"Run the updated setup.sql in Supabase first (SQL Editor → paste → Run), then reload.":"Couldn't save it. Check your connection and try again."),null;
+  S.customCats.push({name,fixed:!!fixed});E.setCustomCategories(S.customCats);
+  refreshCatLists();toast(`Added “${name}”`);return name;
+}
+async function removeCategory(name){
+  const ids=S.exp.filter(e=>e.category===name).map(e=>e.id);
+  for(let i=0;i<ids.length;i+=150){const {error}=await sb.from("expenses").update({category:"Other"}).in("id",ids.slice(i,i+150));if(error)return toast("Couldn't remove it. Try again.")}
+  S.exp.forEach(e=>{if(e.category===name)e.category="Other"});
+  const gone=S.rules.filter(r=>r.category===name&&r.kind==="spend");
+  for(const r of gone)await sb.from("spend_rules").delete().eq("pattern",r.pattern);
+  S.rules=S.rules.filter(r=>!gone.includes(r));
+  const {error}=await sb.from("spend_categories").delete().eq("name",name);if(error)return toast("Couldn't remove it. Try again.");
+  S.customCats=S.customCats.filter(c=>c.name!==name);E.setCustomCategories(S.customCats);
+  if(S.cat===name)S.cat="all";
+  refreshCatLists();render();renderRules();toast(ids.length?`Removed. ${ids.length} line${ids.length===1?"":"s"} moved to Other.`:"Removed");
+}
+async function toggleBill(name,fixed){
+  const {error}=await sb.from("spend_categories").update({fixed}).eq("name",name);if(error)return toast("Couldn't save. Try again.");
+  const c=S.customCats.find(c=>c.name===name);if(c)c.fixed=fixed;E.setCustomCategories(S.customCats);render();renderCategories();
+}
+function renderCategories(){
+  const used=n=>S.exp.filter(e=>e.category===n).length;
+  $("cats2").innerHTML=`<form id="catAdd" style="flex-direction:row;gap:8px" autocomplete="off"><input id="caName" type="text" maxlength="30" placeholder="New category name" aria-label="New category name" style="flex:1"><button class="btn primary" type="submit">Add</button></form>
+    <div class="err" id="caErr" hidden></div>
+    ${S.customCats.length?`<table><tbody>${S.customCats.map(c=>`<tr><td>${esc(c.name)}<div class="hint">${used(c.name)} line${used(c.name)===1?"":"s"}</div></td>
+      <td><label class="check" style="font-size:13px"><input type="checkbox" data-bill="${esc(c.name)}" ${c.fixed?"checked":""}> Monthly bill</label></td>
+      <td class="n"><button class="linkbtn" type="button" data-rm="${esc(c.name)}">Remove</button></td></tr>`).join("")}</tbody></table>`:'<div class="hint">You haven\'t added any yet. You can also add one from any category list with “＋ New category…”.</div>'}
+    <div class="hint">Built in: ${E.CATEGORIES.filter(c=>!c.custom).map(c=>esc(c.name)).join(", ")}.</div>`;
+  $("catAdd").onsubmit=async ev=>{ev.preventDefault();$("caErr").hidden=true;
+    const n=await addCategory($("caName").value,false,m=>{$("caErr").textContent=m;$("caErr").hidden=false});if(n)$("caName").value=""};
+  $("cats2").querySelectorAll("[data-bill]").forEach(b=>b.onchange=()=>toggleBill(b.dataset.bill,b.checked));
+  $("cats2").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{
+    if(b.dataset.armed!=="1"){const n=used(b.dataset.rm);b.dataset.armed="1";b.textContent=n?`Tap again (moves ${n} to Other)`:"Tap again";setTimeout(()=>{b.dataset.armed="";b.textContent="Remove"},4000);return}
+    removeCategory(b.dataset.rm)});
+}
+// Rebuild every category list, keeping what's selected.
+function refreshCatLists(){
+  ["xCat","eCat"].forEach(id=>{const v=$(id).value;if(v&&v!==NEW_CAT)$(id).innerHTML=catOptions(v)});
+  syncFilters();renderCategories();
+}
 function openEdit(id){
   const e=S.exp.find(x=>x.id===id);if(!e)return;S.editId=id;
   $("eTitle").textContent=shopName(e);
@@ -586,6 +664,7 @@ $("eDel").addEventListener("click",async()=>{
 /* ---------- add expense ---------- */
 function resetAdd(){$("xAmt").value="";$("xDesc").value="";$("xIn").checked=false;$("xDate").value=todayStr();$("xCat").innerHTML=catOptions("Other");$("xCat").dataset.touched=""}
 $("xDesc").addEventListener("input",()=>{if($("xCat").dataset.touched)return;const c=E.classify({desc:$("xDesc").value,amount:1,type:"card"},S.rules);$("xCat").value=c.category})
+watchCatSelect($("xCat"));watchCatSelect($("eCat"));
 $("xCat").addEventListener("change",()=>$("xCat").dataset.touched="1");
 $("addForm").addEventListener("submit",async ev=>{ev.preventDefault();
   const amt=Number($("xAmt").value),desc=$("xDesc").value.trim();if(!(amt>0)||!desc)return;
@@ -829,7 +908,7 @@ function render(){
   const months=S.exp.map(e=>e.date.slice(0,7)).sort();const first=months[0]||todayStr().slice(0,7);
   $("mPrev").disabled=S.month<=E.addMonth(first,-1);$("mNext").disabled=S.month>=E.addMonth(todayStr().slice(0,7),1);
   $("acctList").innerHTML=[...new Set(S.exp.map(e=>e.account).concat(S.plans.map(p=>p.account)).filter(Boolean))].map(a=>`<option value="${esc(a)}">`).join("");
-  renderStatus();renderCats();renderShops();renderTrend();renderList();renderPlans();
+  renderStatus();renderCats();renderShops();renderTrend();renderList();renderPlans();renderCategories();
 }
 $("mPrev").onclick=()=>{S.month=E.addMonth(S.month,-1);S.shown=80;render()};
 $("mNext").onclick=()=>{S.month=E.addMonth(S.month,1);S.shown=80;render()};
@@ -841,13 +920,14 @@ const sb=configured&&window.supabase?window.supabase.createClient(CFG.supabaseUr
 const normExp=x=>Object.assign({},x,{amount:Number(x.amount)});
 async function fetchAll(table,cols,order){const out=[];for(let i=0;;i+=1000){let q=sb.from(table).select(cols).range(i,i+999);if(order)q=q.order(order);const {data,error}=await q;if(error)return {error};out.push(...data);if(data.length<1000)return {data:out}}}
 async function loadAll(){
-  const [ex,ru,la,pl,se,sh,ra,me]=await Promise.all([
+  const [ex,ru,la,pl,se,sh,ra,me,ca]=await Promise.all([
     fetchAll("expenses","id,date,description,merchant,amount,category,kind,account,source,import_hash,note,created_at","date"),
     sb.from("spend_rules").select("pattern,category,kind"),sb.from("import_layouts").select("signature,name,mapping"),
     sb.from("plans").select("id,name,monthly,start_month,payments,account,note"),sb.from("spend_settings").select("take_home,warn_at,shortcut_token").maybeSingle(),
-    fetchAll("shifts","date,job,time_in,time_out","date"),sb.from("rates").select("job,effective_from,rate"),fetchAll("mercor_tasks","date,hours,rate_usd,bonus_usd,fx","date")]);
+    fetchAll("shifts","date,job,time_in,time_out","date"),sb.from("rates").select("job,effective_from,rate"),fetchAll("mercor_tasks","date,hours,rate_usd,bonus_usd,fx","date"),sb.from("spend_categories").select("name,fixed").order("created_at")]);
   if(ex.error){banner(/relation|does not exist|schema cache/i.test(ex.error.message||"")?"<b>One-time setup needed.</b> Run <code>setup.sql</code> in Supabase (SQL Editor → New query → Run), then reload. The steps are in README.md.":"Couldn't load your spending. Check your connection and reload the page.");return}
   banner("");
+  S.catsOk=!ca.error;S.customCats=(ca.data||[]).map(c=>({name:c.name,fixed:!!c.fixed}));E.setCustomCategories(S.customCats);
   S.exp=ex.data.map(normExp);S.rules=ru.data||[];S.plans=(pl.data||[]).map(p=>Object.assign(p,{monthly:Number(p.monthly)}));
   S.layouts={};(la.data||[]).forEach(l=>S.layouts[l.signature]=l.mapping);
   if(se.data)S.settings=Object.assign({},S.settings,se.data,{take_home:Number(se.data.take_home),warn_at:Number(se.data.warn_at)});
@@ -856,7 +936,7 @@ async function loadAll(){
   S.pay={shifts:(sh.data||[]).map(x=>({date:x.date,job:x.job,in:x.time_in.slice(0,5),out:x.time_out.slice(0,5)})),rates,
     tasks:me.error?[]:me.data.map(x=>({date:x.date,hours:Number(x.hours),rate:Number(x.rate_usd),bonus:Number(x.bonus_usd)||0,fx:Number(x.fx)}))};
   $("sTake").value=Math.round(takeHome()*100);$("sWarn").value=Math.round(warnAt()*100);
-  render();renderShortcut();renderRules();
+  refreshCatLists();render();renderShortcut();renderRules();
   sortTaps();syncIncome();
 }
 // Apple Pay taps arrive without a category; sort them with the same rules as imports.

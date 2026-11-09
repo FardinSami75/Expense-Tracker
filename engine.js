@@ -18,11 +18,23 @@ const CATEGORIES = [
   { name: "Health & personal",  color: "#d6455d" },
   { name: "Entertainment",      color: "#9b59b6" },
   { name: "Education",          color: "#4f7a28" },
+  { name: "Gifts",              color: "#e05297" },
   { name: "Donations",          color: "#b5651d" },
   { name: "Fees & interest",    color: "#8a6d3b", fixed: true },
   { name: "Other",              color: "#7b8494" }
 ];
 const CAT = Object.fromEntries(CATEGORIES.map(c => [c.name, c]));
+const BUILTIN_NAMES = new Set(CATEGORIES.map(c => c.name));
+
+// Categories you make on the website: [{ name, fixed }]. They go just before "Other".
+function setCustomCategories(list) {
+  for (let i = CATEGORIES.length - 1; i >= 0; i--) if (CATEGORIES[i].custom) { delete CAT[CATEGORIES[i].name]; CATEGORIES.splice(i, 1); }
+  const other = CATEGORIES.findIndex(c => c.name === "Other");
+  const add = (list || []).filter(c => c && c.name && !BUILTIN_NAMES.has(c.name))
+    .map(c => ({ name: c.name, color: "#7b8494", fixed: !!c.fixed, custom: true }));
+  CATEGORIES.splice(other, 0, ...add);
+  add.forEach(c => CAT[c.name] = c);
+}
 
 // kind: which rows count as spending
 const KINDS = {
@@ -48,6 +60,7 @@ const BUILTIN = [
   [/CINEPLEX|LANDMARK CINEMAS|THEATRE|THEATER|TICKETMASTER|EVENTBRITE|STEAM|EPIC GAMES|BOWLING|ESCAPE|TOPGOLF|CALGARY ZOO|STAMPEDE PARK|FLAMES|SADDLEDOME|CONCERT|MUSEUM/, "Entertainment"],
   [/UNIVERSITY OF CALGARY|UOFC|U OF C|BOOKSTORE|TUITION|PEARSON|MCGRAW|CENGAGE|WILEY|CHEGG|COURSERA|UDEMY|LEETCODE/, "Education"],
   [/UNICEF|DONAT|RED CROSS|CHARITY|FOUNDATION|ZAKAT|MOSQUE|MASJID|CHURCH|GOFUNDME|WORLD VISION|DOCTORS WITHOUT|SICKKIDS|FOOD BANK/, "Donations"],
+  [/FLORIST|FLOWERS|HALLMARK|GIFT ?SHOP|GIFTS?\b(?! ?CARD)/, "Gifts"],
   [/AMAZON|AMZN|TEMU|SHEIN|ALIEXPRESS|EBAY|ETSY|WINNERS|MARSHALLS|HOMESENSE|HOME SENSE|WALMART|DOLLARAMA|DOLLAR TREE|BEST BUY|BESTBUY|CANADIAN TIRE|IKEA|STAPLES|LONDON|DENIM|LEVI|H ?& ?M|UNIQLO|ZARA|GAP\b|OLD NAVY|AMERICAN EAGLE|AERIE|ROOTS|NIKE|ADIDAS|SPORT CHEK|SPORTCHEK|LULULEMON|ARITZIA|SIMONS|HUDSON|THE BAY|MEC\b|APPLE STORE|SAMSUNG|MEMORY EXPRESS|CANADA COMPUTERS|SEPHORA|TOYS|INDIGO|CHAPTERS|MICHAELS|DOLLAR|PAYPAL|SHOP|STORE|OUTLET|BOUTIQUE|MALL|CROSSIRON|CHINOOK|MARKET MALL|SMITH/, "Shopping"]
 ];
 
@@ -578,7 +591,7 @@ function parsePdf(pages, today) {
   return { rows, meta, check };
 }
 
-const api = { CATEGORIES, CAT, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
+const api = { CATEGORIES, CAT, BUILTIN_NAMES, setCustomCategories, KINDS, PRESETS, parseCSV, parseDate, parseAmount, guessOrder, detectLayout, readRows, signatureOf,
   merchantKey, displayName, payeeOf, classify, builtinCategory, importHashes, hashOf,
   parsePdf, leadingDate, splitChexy, CHEXY_FEE, paydays, monthIncome, monthStats, projection, planDue, planStatus, addMonth, daysIn, addDays, mKey, pad };
 root.SpendEngine = api;

@@ -69,7 +69,17 @@ create table if not exists public.month_income (
   primary key (user_id, month)
 );
 
+-- Categories you add yourself on the website. fixed = a once-a-month bill (not projected forward).
+create table if not exists public.spend_categories (
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  name text not null,
+  fixed boolean not null default false,
+  created_at timestamptz not null default now(),
+  primary key (user_id, name)
+);
+
 alter table public.expenses       enable row level security;
+alter table public.spend_categories enable row level security;
 alter table public.spend_rules    enable row level security;
 alter table public.import_layouts enable row level security;
 alter table public.plans          enable row level security;
@@ -87,6 +97,8 @@ drop policy if exists "own plans" on public.plans;
 create policy "own plans" on public.plans for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "own spend settings" on public.spend_settings;
 create policy "own spend settings" on public.spend_settings for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own categories" on public.spend_categories;
+create policy "own categories" on public.spend_categories for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "own month income" on public.month_income;
 create policy "own month income" on public.month_income for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 

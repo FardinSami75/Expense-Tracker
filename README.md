@@ -48,6 +48,8 @@ Only the code is in this repository. No spending data is stored here.
 ### Categories that learn
 - Purchases are sorted automatically (groceries, eating out, gas, rent, bills, subscriptions, shopping, and more).
 - Tap any line to change its category, amount, date or note. Tick **Always do this for …** to fix every past and future line from that shop.
+- **Make your own categories:** Settings → Categories, or pick **＋ New category…** from any category list. Tick "Monthly bill" for things paid once a month so they aren't projected forward. Removing one moves its lines to Other.
+- A **Gifts** category is built in.
 - Anything it couldn't sort is marked **sort** and counted at the top of "Where it went".
 
 ### Instalment plans
