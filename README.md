@@ -45,6 +45,7 @@ Only the code is in this repository. No spending data is stored here.
 ### Paying for other people
 - **Split a bill:** paid the whole table's bill? Tap the line (or tick **I paid for someone else** when adding one) and enter **my share**. A $300 charge with an $80 share counts as **$80** of spending; the $220 is tracked under **Owed to you**.
 - **Bought something for someone:** tap **None of it was mine**. The charge counts as $0 of your spending, and the full amount is owed to you.
+- **Passing money on:** someone gave you money to hand to another person? Set both the money in and the money out to **Passing money on for someone** (under "Counts as", or tick it when adding one by hand). Neither counts as income or spending, and the Owed to you card shows if you're still holding any of it.
 - **Getting paid back:** e-Transfers you receive while you're owed money are filed as **Paid back for something I bought them**. That's not income and not spending, so nothing is counted twice. The owed total goes down as they pay. You can also set any money-in line to this by hand.
 
 ### Chexy rent

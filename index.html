@@ -309,6 +309,7 @@ details summary{cursor:pointer;font-weight:600;font-size:14px}
             <span class="hint" id="xOwe">Only your share counts as spending. The rest is tracked as owed to you.</span>
           </div>
           <label class="check"><input type="checkbox" id="xIn"> Money back to me (refund, or a friend paying me back)</label>
+          <label class="check"><input type="checkbox" id="xPass"> Passing money on for someone (not mine: not spending or income)</label>
           <label class="check" id="xRepayRow" hidden style="margin-left:26px"><input type="checkbox" id="xRepay" checked> It's someone paying me back for something I bought them</label>
           <button class="btn primary" type="submit" id="xSave">Add expense</button>
         </form>
@@ -326,6 +327,7 @@ details summary{cursor:pointer;font-weight:600;font-size:14px}
       <div><span class="eyebrow">Paid for others</span><div id="oweSplits"></div></div>
       <div><span class="eyebrow">Paid back</span><div id="oweRepays"></div></div>
     </div>
+    <div class="hint" id="oweHold" hidden style="color:var(--ink-2);font-size:13px"></div>
     <span class="hint">e-Transfers you receive while you're owed money are filed as “Paid back for something I bought them”: not income and not spending. Tap any line to change it.</span>
   </section>
 
@@ -712,14 +714,17 @@ function oweHint(p){const amt=Number($(p+"Amt").value),sh=Number($(p+"Share").va
   $(p+"Owe").textContent=!ok?"Only your share counts as spending. The rest is tracked as owed to you.":sh===0?`None of this counts as your spending. ${money(amt)} is owed to you.`:`Only ${money(sh)} counts as your spending. ${money(amt-sh)} is owed to you.`}
 ["x","e"].forEach(p=>{
   $(p+"None").addEventListener("click",()=>{$(p+"Share").value="0";oweHint(p)});
-  $(p+"Split").addEventListener("change",()=>{$(p+"SplitBox").hidden=!$(p+"Split").checked;if($(p+"Split").checked){if(p==="x")$("xIn").checked=false;$(p+"Share").focus()}oweHint(p)});
+  $(p+"Split").addEventListener("change",()=>{$(p+"SplitBox").hidden=!$(p+"Split").checked;if($(p+"Split").checked){if(p==="x"){$("xIn").checked=false;$("xPass").checked=false}$(p+"Share").focus()}oweHint(p)});
   [p+"Share",p+"Amt"].forEach(id=>$(id).addEventListener("input",()=>oweHint(p)));
 });
+$("xPass").addEventListener("change",()=>{if($("xPass").checked){$("xSplit").checked=false;$("xSplitBox").hidden=true;$("xRepayRow").hidden=true}});
 $("xIn").addEventListener("change",()=>{if($("xIn").checked){$("xSplit").checked=false;$("xSplitBox").hidden=true}
-  $("xRepayRow").hidden=!($("xIn").checked&&S.splitOk&&E.owedSummary(S.exp).outstanding>0);$("xRepay").checked=true});
+  $("xRepayRow").hidden=!($("xIn").checked&&!$("xPass").checked&&S.splitOk&&E.owedSummary(S.exp).outstanding>0);$("xRepay").checked=true});
 function renderOwed(){
   const O=E.owedSummary(S.exp);
-  $("oweCard").hidden=!O.splits.length&&!O.repays.length;if($("oweCard").hidden)return;
+  $("oweCard").hidden=!O.splits.length&&!O.repays.length&&!O.passes.length;if($("oweCard").hidden)return;
+  $("oweHold").hidden=!O.passes.length;
+  $("oweHold").innerHTML=O.passes.length?(Math.abs(O.holding)<0.005?"Money passed on for others: all handed over.":O.holding>0?`You're holding <b>${money(O.holding)}</b> that someone gave you to pass on.`:`You've passed on <b>${money(-O.holding)}</b> more than you were given for it (check a line is marked right).`):"";
   $("oweTotal").textContent=money(Math.max(0,O.outstanding));$("oweTotal").className="big "+(O.outstanding>0?"warnc":"good");
   const row=(e,amt,meta)=>`<button class="owe tx" type="button" data-id="${e.id}" style="display:flex"><span style="min-width:0;display:flex;flex-direction:column"><span class="nm">${esc(shopName(e))}</span><span class="meta">${meta}</span></span><span class="amt">${amt}</span></button>`;
   $("oweSplits").innerHTML=O.splits.slice(0,6).map(e=>row(e,money(Number(e.amount)-Number(e.my_share)),`${fmtDay(e.date)} · paid ${money(Number(e.amount))}${Number(e.my_share)?`, mine ${money(Number(e.my_share))}`:", none mine"}${e.note?" · "+esc(e.note):""}`)).join("")||'<div class="hint">None</div>';
@@ -728,7 +733,7 @@ function renderOwed(){
   $("oweCard").querySelectorAll("[data-id]").forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
 }
 
-function resetAdd(){$("xRepayRow").hidden=true;$("xSplit").checked=false;$("xSplitBox").hidden=true;$("xShare").value="";$("xWho").value="";$("xSplit").closest("label").hidden=!S.splitOk;$("xAmt").value="";$("xDesc").value="";$("xIn").checked=false;$("xDate").value=todayStr();$("xCat").innerHTML=catOptions("Other");$("xCat").dataset.touched=""}
+function resetAdd(){$("xPass").checked=false;$("xRepayRow").hidden=true;$("xSplit").checked=false;$("xSplitBox").hidden=true;$("xShare").value="";$("xWho").value="";$("xSplit").closest("label").hidden=!S.splitOk;$("xAmt").value="";$("xDesc").value="";$("xIn").checked=false;$("xDate").value=todayStr();$("xCat").innerHTML=catOptions("Other");$("xCat").dataset.touched=""}
 $("xDesc").addEventListener("input",()=>{if($("xCat").dataset.touched)return;const c=E.classify({desc:$("xDesc").value,amount:1,type:"card"},S.rules);$("xCat").value=c.category})
 watchCatSelect($("xCat"));watchCatSelect($("eCat"));
 $("xCat").addEventListener("change",()=>$("xCat").dataset.touched="1");
@@ -736,6 +741,7 @@ $("addForm").addEventListener("submit",async ev=>{ev.preventDefault();
   const amt=Number($("xAmt").value),desc=$("xDesc").value.trim();if(!(amt>0)||!desc)return;
   const row={user_id:S.user.id,date:$("xDate").value||todayStr(),description:desc,merchant:E.merchantKey(desc),amount:$("xIn").checked?-amt:amt,category:$("xCat").value,kind:"spend",account:$("xAcct").value.trim()||null,source:"manual"};
   if($("xIn").checked&&!$("xRepayRow").hidden&&$("xRepay").checked)row.kind="repay";
+  if($("xPass").checked){row.kind="passthru";row.category="Other"}
   if(S.splitOk&&!$("xIn").checked){const sh=splitShare("x",amt);if(sh===false)return;if(sh!=null){row.my_share=sh;const who=$("xWho").value.trim();if(who)row.note="Split with "+who}}
   $("xSave").disabled=true;
   const {data,error}=await sb.from("expenses").insert(row).select().single();$("xSave").disabled=false;

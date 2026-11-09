@@ -44,6 +44,7 @@ const KINDS = {
   income:   "Pay / money in",
   plan:     "On an instalment plan",
   repay:    "Paid back for something I bought them",
+  passthru: "Passing money on for someone",
   ignore:   "Don't count"
 };
 
@@ -312,7 +313,7 @@ function displayName(key) {
   if (key.startsWith("E-TRANSFER")) { const p = key.slice(11).trim(); return p ? "e-Transfer · " + titleCase(p) : "e-Transfer"; }
   return titleCase(key);
 }
-function titleCase(s) { return s.toLowerCase().replace(/(^|[\s.&'-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bAnd\b/g, "and"); }
+function titleCase(s) { return s.toLowerCase().replace(/(^|[\s.&-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bAnd\b/g, "and"); }
 
 /* ---------- categorising ---------- */
 function builtinCategory(U) { for (const [re, cat] of BUILTIN) if (re.test(U)) return cat; return "Other"; }
@@ -438,7 +439,10 @@ function owedSummary(expenses) {
   const repays = expenses.filter(e => e.kind === "repay").sort((a, b) => a.date < b.date ? 1 : -1);
   const owed = splits.reduce((t, e) => t + Number(e.amount) - Number(e.my_share), 0);
   const repaid = repays.reduce((t, e) => t + Math.abs(Number(e.amount)), 0);
-  return { splits, repays, owed, repaid, outstanding: Math.round((owed - repaid) * 100) / 100 };
+  // Money someone gave you to hand to another person: what came in minus what went out.
+  const passes = expenses.filter(e => e.kind === "passthru").sort((a, b) => a.date < b.date ? 1 : -1);
+  const holding = Math.round(-passes.reduce((t, e) => t + Number(e.amount), 0) * 100) / 100;
+  return { splits, repays, owed, repaid, outstanding: Math.round((owed - repaid) * 100) / 100, passes, holding };
 }
 
 // Where the month is heading. lastFixed = last month's bills, used until this month's arrive.
